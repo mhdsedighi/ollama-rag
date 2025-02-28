@@ -19,14 +19,13 @@ MAIN_MODEL_NAME = "ragmain"
 WEB_SEARCH_ENABLED = False
 SPEAK_ALOUD_MAC_ENABLED = False
 
-DEBUG_ENABLED = False
+DEBUG_ENABLED = True  # Changed to True for debugging
 
 db = TinyDB('./config.json')
 agent_table = db.table('agent')
 model_table = db.table('model')
 
 class CustomChatMemory(BaseMemory):
-    """Custom memory class to use with 0.3.x chain."""
     chat_memory: InMemoryChatMessageHistory = InMemoryChatMessageHistory()
     ai_prefix: str = "AI"
 
@@ -58,7 +57,7 @@ class Converse:
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.2
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_BOOKS = 2
-    DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.6
+    DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.3  # Lowered from 0.6 to 0.3
     DONT_KNOW_RESPONSE_LEN_LIMIT = 200
     DATE_ONLY_PATTERN = '%Y-%m-%d'
     RET_DATE_REL_LIST_LEN_MAX = 3
@@ -106,7 +105,7 @@ class Converse:
             """ + self.agent_name + """:"""
         self.prompt = PromptTemplate(input_variables=["context", "input"], template=template)
 
-        # Modern Chroma setup for memory with explicit settings
+        # Modern Chroma setup for memory
         mem_settings = chromadb.Settings(
             is_persistent=True,
             persist_directory="./chroma_db_mem",
@@ -125,8 +124,11 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_MEM,
             },
         )
+        # Debug: Check memory DB contents
+        mem_contents = self.chroma_db_mem.get()
+        print(f"Memory DB contents: {len(mem_contents['documents'])} documents")
 
-        # Modern Chroma setup for books (PDFs) with explicit settings
+        # Modern Chroma setup for books (PDFs)
         books_settings = chromadb.Settings(
             is_persistent=True,
             persist_directory="./chroma_db_pdfs",
@@ -145,6 +147,11 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS,
             },
         )
+        # Debug: Check books DB contents
+        books_contents = self.chroma_db_books.get()
+        print(f"Books DB contents: {len(books_contents['documents'])} documents")
+        if books_contents['documents']:
+            print("Sample book document:", books_contents['documents'][0])
 
         self.chain = (
             {
@@ -274,7 +281,7 @@ class Converse:
     
     def ask(self, query: str):
         isQueryInteresting = self.getIsInteresting(query)
-        self.enable_doc_search = isQueryInteresting
+        self.enable_doc_search = True  # Forced to True for testing
         if DEBUG_ENABLED:
             print("Is query interesting? " + str(isQueryInteresting))
         fullQuery = self.user_name + ": " + query
