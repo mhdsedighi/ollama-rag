@@ -11,6 +11,7 @@ from langchain.prompts import ChatPromptTemplate
 from tinydb import TinyDB
 from datetime import datetime
 from random import randrange
+import chromadb
 import os, re, subprocess
 
 MAIN_MODEL_NAME = "ragmain"
@@ -26,13 +27,11 @@ model_table = db.table('model')
 
 class CustomChatMemory(BaseMemory):
     """Custom memory class to use with 0.3.x chain."""
-    # Declare chat_memory as a class attribute with a default value
     chat_memory: InMemoryChatMessageHistory = InMemoryChatMessageHistory()
-    ai_prefix: str = "AI"  # Also declare ai_prefix for clarity
+    ai_prefix: str = "AI"
 
     def __init__(self, chat_memory=None, ai_prefix="AI"):
         super().__init__()
-        # Override the default chat_memory if provided
         self.chat_memory = chat_memory or InMemoryChatMessageHistory()
         self.ai_prefix = ai_prefix
 
@@ -41,7 +40,6 @@ class CustomChatMemory(BaseMemory):
         return {"context": "\n".join([msg.content for msg in messages])}
 
     def save_context(self, inputs, outputs):
-        """Save the input and output to chat memory."""
         input_str = inputs.get("input", "")
         output_str = outputs.get("output", "")
         if input_str:
@@ -50,25 +48,19 @@ class CustomChatMemory(BaseMemory):
             self.chat_memory.add_ai_message(output_str)
 
     def clear(self):
-        """Clear all messages from memory."""
         self.chat_memory.clear()
 
     @property
     def memory_variables(self):
-        """Define the memory variable names this class manages."""
         return ["context"]
 
 class Converse:
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.2
-
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_BOOKS = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.6
-
     DONT_KNOW_RESPONSE_LEN_LIMIT = 200
-
     DATE_ONLY_PATTERN = '%Y-%m-%d'
-
     RET_DATE_REL_LIST_LEN_MAX = 3
     RET_DATE_REL_RECENT_AMT = 2
     RET_DATE_REL_OLDER_AMT = 1
@@ -82,8 +74,14 @@ class Converse:
     previous_text_ai = None
 
     def __init__(self):
-        os.environ["TOKENIZERS_PARALLELISM"] = "false" # required to run Chroma DB properly on CPU
-
+        os.environ["TOKENIZERS_PARALLELISM"] = "false"
+        db = TinyDB('./config.json')
+        agent_table = db.table('agent')
+        model_table = db.table('model')
+        if not agent_table.all():
+            agent_table.insert({"user_name": "User", "agent_name": "Agent"})
+        if not model_table.all():
+            model_table.insert({"fast_model": "llama2"})
         model_table_row = model_table.all()[0]
         agent_table_row = agent_table.all()[0]
         self.user_name = agent_table_row["user_name"]
@@ -108,11 +106,17 @@ class Converse:
             """ + self.agent_name + """:"""
         self.prompt = PromptTemplate(input_variables=["context", "input"], template=template)
 
-        # set up memories DB
-        self.chroma_db_mem = Chroma(
-            embedding_function=FastEmbedEmbeddings(),
+        # Modern Chroma setup for memory with explicit settings
+        mem_settings = chromadb.Settings(
+            is_persistent=True,
             persist_directory="./chroma_db_mem",
-            collection_name="mem"
+            allow_reset=True
+        )
+        mem_client = chromadb.PersistentClient(settings=mem_settings)
+        self.chroma_db_mem = Chroma(
+            client=mem_client,
+            collection_name="mem",
+            embedding_function=FastEmbedEmbeddings()
         )
         self.retriever_mem = self.chroma_db_mem.as_retriever(
             search_type="similarity_score_threshold",
@@ -121,11 +125,18 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_MEM,
             },
         )
-        # set up books DB
-        self.chroma_db_books = Chroma(
-            embedding_function=FastEmbedEmbeddings(),
+
+        # Modern Chroma setup for books (PDFs) with explicit settings
+        books_settings = chromadb.Settings(
+            is_persistent=True,
             persist_directory="./chroma_db_pdfs",
-            collection_name="pdfs"
+            allow_reset=True
+        )
+        books_client = chromadb.PersistentClient(settings=books_settings)
+        self.chroma_db_books = Chroma(
+            client=books_client,
+            collection_name="pdfs",
+            embedding_function=FastEmbedEmbeddings()
         )
         self.retriever_books = self.chroma_db_books.as_retriever(
             search_type="similarity_score_threshold",
@@ -134,13 +145,14 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS,
             },
         )
+
         self.chain = (
             {
                 "context": self.orchestrateRetrievers,
                 "input": RunnablePassthrough()
             } | self.prompt
-                | self.model
-                | StrOutputParser()
+            | self.model
+            | StrOutputParser()
         )
 
     def orchestrateRetrievers(self, query: str):
@@ -159,14 +171,14 @@ class Converse:
         return result
 
     def retrieverLogBookMetadata(self, docs):
-        for i in len(docs):
+        for i in range(len(docs)):
             d = docs[i]
             attribution = ""
             title = d.metadata.get("title")
             author = d.metadata.get("author")
-            if title != None and title != "":
+            if title is not None and title != "":
                 attribution = "\"" + title + "\""
-            if author != None and author != "":
+            if author is not None and author != "":
                 if len(attribution) > 0:
                     attribution += " "
                 attribution += "by " + author
@@ -179,9 +191,9 @@ class Converse:
             attribution = ""
             title = d.metadata.get("title")
             author = d.metadata.get("author")
-            if title != None and title != "":
+            if title is not None and title != "":
                 attribution = "\"" + title + "\""
-            if author != None and author != "":
+            if author is not None and author != "":
                 if len(attribution) > 0:
                     attribution += " "
                 attribution += "by " + author
@@ -233,7 +245,7 @@ class Converse:
     def ingest(self, query: str, isInteresting: bool=None):
         if DEBUG_ENABLED:
             print("ingest: " + query)
-        if isInteresting == None:
+        if isInteresting is None:
             isInteresting = self.getIsInteresting(query)
         if not isInteresting:
             if DEBUG_ENABLED:
@@ -245,8 +257,8 @@ class Converse:
         if DEBUG_ENABLED:
             print("extracted: " + extracted)
         self.chroma_db_mem.add_texts(
-            texts = [extracted],
-            metadatas = [{"timestamp": datetime.today().strftime(self.DATE_ONLY_PATTERN)}]
+            texts=[extracted],
+            metadatas=[{"timestamp": datetime.today().strftime(self.DATE_ONLY_PATTERN)}]
         )
     
     def getIsInteresting(self, query: str):
@@ -258,7 +270,7 @@ class Converse:
         ) | self.tech_model | StrOutputParser()).invoke({"prompt": query})
         if DEBUG_ENABLED:
             print(result + " RESULT for: " + test_prompt)
-        return re.search("yes", result, re.IGNORECASE) != None    
+        return re.search("yes", result, re.IGNORECASE) is not None    
     
     def ask(self, query: str):
         isQueryInteresting = self.getIsInteresting(query)
@@ -267,11 +279,9 @@ class Converse:
             print("Is query interesting? " + str(isQueryInteresting))
         fullQuery = self.user_name + ": " + query
         response = self.generateResponse(fullQuery)
-        
-        # Save to memory using save_context
         self.memory.save_context({"input": query}, {"output": response})
         
-        if WEB_SEARCH_ENABLED and len(response) <= self.DONT_KNOW_RESPONSE_LEN_LIMIT and re.search("don\'t know", response, re.IGNORECASE) != None:
+        if WEB_SEARCH_ENABLED and len(response) <= self.DONT_KNOW_RESPONSE_LEN_LIMIT and re.search("don\'t know", response, re.IGNORECASE) is not None:
             if DEBUG_ENABLED:
                 print("Rejected unsure response: " + response)
             if SPEAK_ALOUD_MAC_ENABLED:
