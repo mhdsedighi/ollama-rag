@@ -1,10 +1,11 @@
-from langchain_community.vectorstores import Chroma
-from langchain_community.chat_models import ChatOllama
+from langchain_chroma import Chroma
+from langchain_ollama import ChatOllama
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain.schema.runnable import RunnablePassthrough
 from langchain.schema.output_parser import StrOutputParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.memory import ConversationBufferMemory
+from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.memory import BaseMemory
 from langchain.prompts import PromptTemplate
 from langchain.prompts import ChatPromptTemplate
 from tinydb import TinyDB
@@ -23,9 +24,43 @@ db = TinyDB('./config.json')
 agent_table = db.table('agent')
 model_table = db.table('model')
 
+class CustomChatMemory(BaseMemory):
+    """Custom memory class to use with 0.3.x chain."""
+    # Declare chat_memory as a class attribute with a default value
+    chat_memory: InMemoryChatMessageHistory = InMemoryChatMessageHistory()
+    ai_prefix: str = "AI"  # Also declare ai_prefix for clarity
+
+    def __init__(self, chat_memory=None, ai_prefix="AI"):
+        super().__init__()
+        # Override the default chat_memory if provided
+        self.chat_memory = chat_memory or InMemoryChatMessageHistory()
+        self.ai_prefix = ai_prefix
+
+    def load_memory_variables(self, inputs):
+        messages = self.chat_memory.messages
+        return {"context": "\n".join([msg.content for msg in messages])}
+
+    def save_context(self, inputs, outputs):
+        """Save the input and output to chat memory."""
+        input_str = inputs.get("input", "")
+        output_str = outputs.get("output", "")
+        if input_str:
+            self.chat_memory.add_user_message(input_str)
+        if output_str:
+            self.chat_memory.add_ai_message(output_str)
+
+    def clear(self):
+        """Clear all messages from memory."""
+        self.chat_memory.clear()
+
+    @property
+    def memory_variables(self):
+        """Define the memory variable names this class manages."""
+        return ["context"]
+
 class Converse:
-    DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 6
-    DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.5
+    DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 2
+    DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.2
 
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_BOOKS = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.6
@@ -57,7 +92,8 @@ class Converse:
         self.model = ChatOllama(model=MAIN_MODEL_NAME)
         self.tech_model = ChatOllama(model=model_table_row["fast_model"])
         self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=100)
-        self.memory = ConversationBufferMemory(ai_prefix=self.agent_name)
+        chat_history = InMemoryChatMessageHistory()
+        self.memory = CustomChatMemory(chat_memory=chat_history, ai_prefix=self.agent_name)
 
         template = """You are talkative and provide lots of specific details from
             previous conversation context and books you have read when relevant.
@@ -231,6 +267,9 @@ class Converse:
             print("Is query interesting? " + str(isQueryInteresting))
         fullQuery = self.user_name + ": " + query
         response = self.generateResponse(fullQuery)
+        
+        # Save to memory using save_context
+        self.memory.save_context({"input": query}, {"output": response})
         
         if WEB_SEARCH_ENABLED and len(response) <= self.DONT_KNOW_RESPONSE_LEN_LIMIT and re.search("don\'t know", response, re.IGNORECASE) != None:
             if DEBUG_ENABLED:

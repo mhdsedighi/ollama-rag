@@ -47,10 +47,15 @@ def page():
         st.session_state["messages"] = []
         st.session_state["converse"] = Converse()
         st.session_state["enable_msg_history"] = False
+        st.session_state["cb_msg_history"] = False  # Initialize here
 
     st.text_input("Message", key="user_input", on_change=process_input)
 
-    st.checkbox("Show all message history", value=st.session_state["enable_msg_history"], key="cb_msg_history", on_change=process_check_box("enable_msg_history", "cb_msg_history"))
+    st.checkbox("Show all message history", 
+                value=st.session_state["enable_msg_history"], 
+                key="cb_msg_history", 
+                on_change=process_check_box, 
+                args=("enable_msg_history", "cb_msg_history"))
 
     display_messages(st.session_state["enable_msg_history"])
 

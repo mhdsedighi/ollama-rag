@@ -26,37 +26,28 @@ def getFileList(filename: str):
         print("Number of PDFs: " + str(list_size))
         fp.close()
     with open(filename) as fp:
-        skip_count = 0
         count = 0
         last_pc = 0.0
         for pdf_filename in fp:
             cleaned_pdf_filename = pdf_filename.replace("\n", "")
-            pre_title = getPdfTitle(cleaned_pdf_filename)
             percentage = (float(count) / float(list_size) * 100)
             if math.floor(last_pc) < math.floor(percentage):
                 print("\n*** {:.2f}% ***\n".format(percentage))
-                skip_count = 0
             last_pc = percentage
-            if not isAlreadyProcessed(cleaned_pdf_filename, pre_title):
-                skip_count = 0
-                percentage = (float(count) / float(list_size) * 100)
-                print("\n{:.2f}% : ".format(percentage) + cleaned_pdf_filename)
-                processPdf(cleaned_pdf_filename)
-            else:
-                if skip_count > 0:
-                    print(".", end="", flush=True)
-                else:
-                    print("skipping already processed.", end="", flush=True)
-                skip_count += 1
+            print("\n{:.2f}% : ".format(percentage) + cleaned_pdf_filename)
+            processPdf(cleaned_pdf_filename)
             count += 1
-
-def isAlreadyProcessed(filename: str, title: str):
-    return len(pdf_ingest_table.search(where('file') == filename)) > 0 or (title != "" and len(pdf_ingest_table.search(where('title') == title)) > 0)
 
 def processPdf(filename: str):
     # get PDF as chunks
     texts = list(map(lambda c: c.page_content, getPdfChromaDbChunks(filename)))
     print("\t num chunks: " + str(len(texts)))
+    # print all extracted text
+    print("\t Extracted text:")
+    for i, text in enumerate(texts):
+        print(f"\t Chunk {i + 1}:")
+        print(f"\t {text}")
+        print("\t" + "-"*50)
     # get metadata for PDF
     title = getPdfTitle(filename)
     print("\t title: " + title)
@@ -77,7 +68,6 @@ def processPdf(filename: str):
         "file": filename,
         "title": title
     })
-
 
 def getPdfChromaDbChunks(filename: str):
     try:
@@ -100,7 +90,6 @@ def getPdfTitle(filename: str):
 
 def removeNonAlphaNumOrSpace(s: str):
     return re.sub(r'[^A-Za-z0-9,:\. ]+', '', s)
-    
 
 if __name__ == "__main__":
     start()
