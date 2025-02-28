@@ -1,0 +1,1 @@
+{"agent": {"1": {"active": true, "agent_type": "assistant", "agent_name": "assistant", "agent_relation": "assistant", "agent_attitude": "assistant", "user_name": "mehdi"}}, "model": {"1": {"active": true, "main_model_source": "gemma:7b", "fast_model": "gemma:7b"}}}

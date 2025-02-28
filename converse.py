@@ -6,8 +6,7 @@ from langchain.schema.output_parser import StrOutputParser
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.chat_history import InMemoryChatMessageHistory
 from langchain_core.memory import BaseMemory
-from langchain.prompts import PromptTemplate
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import PromptTemplate, ChatPromptTemplate
 from tinydb import TinyDB
 from datetime import datetime
 from random import randrange
@@ -15,15 +14,14 @@ import chromadb
 import os, re, subprocess
 
 MAIN_MODEL_NAME = "ragmain"
-
 WEB_SEARCH_ENABLED = False
 SPEAK_ALOUD_MAC_ENABLED = False
-
 DEBUG_ENABLED = True
 
 db = TinyDB('./config.json')
 agent_table = db.table('agent')
 model_table = db.table('model')
+
 
 class CustomChatMemory(BaseMemory):
     chat_memory: InMemoryChatMessageHistory = InMemoryChatMessageHistory()
@@ -53,6 +51,7 @@ class CustomChatMemory(BaseMemory):
     def memory_variables(self):
         return ["context"]
 
+
 class Converse:
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.2
@@ -77,12 +76,15 @@ class Converse:
         db = TinyDB('./config.json')
         agent_table = db.table('agent')
         model_table = db.table('model')
+
         if not agent_table.all():
             agent_table.insert({"user_name": "User", "agent_name": "Agent"})
         if not model_table.all():
             model_table.insert({"fast_model": "llama2"})
+
         model_table_row = model_table.all()[0]
         agent_table_row = agent_table.all()[0]
+
         self.user_name = agent_table_row["user_name"]
         self.agent_name = agent_table_row["agent_name"]
 
@@ -185,33 +187,33 @@ class Converse:
         return result
 
     def retrieverLogBookMetadata(self, docs):
-        for i in range(len(docs)):
-            d = docs[i]
+        for i, d in enumerate(docs):
             attribution = ""
-            title = d.metadata.get("title")
-            author = d.metadata.get("author")
-            if title is not None and title != "":
-                attribution = "\"" + title + "\""
-            if author is not None and author != "":
+            title = d.metadata.get("title", "Unknown")
+            author = d.metadata.get("author", "Unknown")
+            if title != "Unknown":
+                attribution = f"\"{title}\""
+            if author != "Unknown":
                 if len(attribution) > 0:
                     attribution += " "
-                attribution += "by " + author
+                attribution += f"by {author}"
             if DEBUG_ENABLED:
-                print("* LOG book " + str(i) + ": " + attribution)
+                print(f"* LOG book {i}: {attribution}")
         return docs
 
     def retrieverAddBookMetadataToBookPassage(self, docs):
         for d in docs:
             attribution = ""
-            title = d.metadata.get("title")
-            author = d.metadata.get("author")
-            if title is not None and title != "":
-                attribution = "\"" + title + "\""
-            if author is not None and author != "":
+            title = d.metadata.get("title", "Unknown")
+            author = d.metadata.get("author", "Unknown")
+            if title != "Unknown":
+                attribution = f"\"{title}\""
+            if author != "Unknown":
                 if len(attribution) > 0:
                     attribution += " "
-                attribution += "by " + author
-            d.page_content = "From book " + attribution + ", \"" + d.page_content.replace("\n", " ").replace("\"", "\'") + "\""
+                attribution += f"by {author}"
+            replaced_content = d.page_content.replace('\n', ' ').replace('"', "'")
+            d.page_content = f"From book {attribution}, \"{replaced_content}\""
         return docs
 
     def retrieverAddDateToPageContent(self, docs):
@@ -224,13 +226,13 @@ class Converse:
             if DEBUG_ENABLED:
                 print("retrieverFilterByDateRelevance, filtering...")
             updated_docs = []
-            docs_tuples = map(lambda d: (self.dateStrToClass(d.metadata["timestamp"]), d), docs)
+            docs_tuples = [(self.dateStrToClass(d.metadata["timestamp"]), d) for d in docs]
             docs_tuples_sorted = sorted(docs_tuples, key=lambda dtup: dtup[0], reverse=True)
             for i in range(self.RET_DATE_REL_RECENT_AMT):
                 updated_docs.append(docs_tuples_sorted[i][1])
             if DEBUG_ENABLED:
-                print("retrieverFilterByDateRelevance, most recent: " + str(updated_docs))
-            docs_tuples_sorted = docs_tuples_sorted[2:]
+                print("retrieverFilterByDateRelevance, most recent:", updated_docs)
+            docs_tuples_sorted = docs_tuples_sorted[self.RET_DATE_REL_RECENT_AMT:]
             for i in range(self.RET_DATE_REL_OLDER_AMT):
                 rnd_index = randrange(len(docs_tuples_sorted))
                 rnd_item = docs_tuples_sorted[rnd_index][1]
@@ -252,7 +254,9 @@ class Converse:
     def logRetrievalFinal(self, docs):
         if DEBUG_ENABLED:
             print("*** FINAL RETRIEVAL LOG START")
-            print("\n\n".join([d.page_content for d in docs]))
+            for d in docs:
+                print(f"Title: {d.metadata.get('title', 'N/A')}, Author: {d.metadata.get('author', 'N/A')}")
+                print(d.page_content)
             print("*** FINAL RETRIEVAL LOG END")
         return docs
 

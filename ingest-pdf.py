@@ -43,6 +43,26 @@ def get_file_list(filename: str):
         print(f"\n{percentage:.2f}% : {pdf_filename}")
         process_pdf(pdf_filename, count, list_size)
 
+def get_pdf_author(filename: str):
+    try:
+        docs = PyPDFLoader(file_path=filename).load()
+        for doc in docs[:5]:
+            # Look for names after title or DOI, before affiliation
+            match = re.search(r"Cross-Cultural Research / [^\n]+\n(.+?)\n(?:University|McMaster)", doc.page_content, re.DOTALL)
+            if match:
+                authors = match.group(1).strip()
+                # Clean up "Sosis, Bressler / COMMUNE LONGEVITY" if present
+                return re.sub(r"\s*/\s*COMMUNE LONGEVITY", "", authors)
+            # Fallback to metadata
+            reader = PdfReader(filename)
+            info = reader.metadata
+            if info and '/Author' in info:
+                return info['/Author']
+        return "Unknown"
+    except Exception as e:
+        print(f"\tError extracting author from {filename}: {e}")
+        return "Unknown"
+
 def process_pdf(filename: str, count: int, total: int):
     """Process a single PDF and ingest it into Chroma."""
     if pdf_ingest_table.contains(doc_id=filename):
@@ -53,17 +73,11 @@ def process_pdf(filename: str, count: int, total: int):
     print(f"\tNum chunks: {len(chunks)}")
     
     if chunks:
-        print("\tExtracted text:")
-        for i, chunk in enumerate(chunks):
-            print(f"\tChunk {i + 1}:")
-            print(f"\t{chunk.page_content}")
-            print("\t" + "-"*50)
-
-    title = get_pdf_title(filename)
-    print(f"\tTitle: {title}")
-
-    if chunks:
-        metadatas = [{"title": title} for _ in range(len(chunks))]
+        title = get_pdf_title(filename)
+        author = get_pdf_author(filename)  # Extract author explicitly
+        print(f"\tTitle: {title}, Author: {author}")
+        
+        metadatas = [{"title": title, "author": author} for _ in range(len(chunks))]
         chroma_db.add_texts(
             texts=[chunk.page_content for chunk in chunks],
             metadatas=metadatas
@@ -71,8 +85,7 @@ def process_pdf(filename: str, count: int, total: int):
         print(f"\tIngested {len(chunks)} chunks into Chroma.")
     else:
         print("\tNothing to ingest, recording for skip.")
-
-    pdf_ingest_table.insert({"file": filename, "title": title, "doc_id": filename})
+    pdf_ingest_table.insert({"file": filename, "title": title, "author": author, "doc_id": filename})
 
 def get_pdf_chroma_db_chunks(filename: str):
     """Load and split a PDF into chunks."""
