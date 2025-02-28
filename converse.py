@@ -19,7 +19,7 @@ MAIN_MODEL_NAME = "ragmain"
 WEB_SEARCH_ENABLED = False
 SPEAK_ALOUD_MAC_ENABLED = False
 
-DEBUG_ENABLED = True  # Changed to True for debugging
+DEBUG_ENABLED = True
 
 db = TinyDB('./config.json')
 agent_table = db.table('agent')
@@ -57,7 +57,7 @@ class Converse:
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_MEM = 2
     DB_SIMILARITY_SEARCH_THRESHOLD_MEM = 0.2
     DB_SIMILARITY_SEARCH_NUM_RETRIEVE_BOOKS = 2
-    DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.3  # Lowered from 0.6 to 0.3
+    DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS = 0.3
     DONT_KNOW_RESPONSE_LEN_LIMIT = 200
     DATE_ONLY_PATTERN = '%Y-%m-%d'
     RET_DATE_REL_LIST_LEN_MAX = 3
@@ -124,9 +124,6 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_MEM,
             },
         )
-        # Debug: Check memory DB contents
-        mem_contents = self.chroma_db_mem.get()
-        print(f"Memory DB contents: {len(mem_contents['documents'])} documents")
 
         # Modern Chroma setup for books (PDFs)
         books_settings = chromadb.Settings(
@@ -147,11 +144,6 @@ class Converse:
                 "score_threshold": self.DB_SIMILARITY_SEARCH_THRESHOLD_BOOKS,
             },
         )
-        # Debug: Check books DB contents
-        books_contents = self.chroma_db_books.get()
-        print(f"Books DB contents: {len(books_contents['documents'])} documents")
-        if books_contents['documents']:
-            print("Sample book document:", books_contents['documents'][0])
 
         self.chain = (
             {
@@ -161,6 +153,21 @@ class Converse:
             | self.model
             | StrOutputParser()
         )
+
+        # Debug after chain setup (optional, safer approach)
+        if DEBUG_ENABLED:
+            try:
+                mem_contents = self.chroma_db_mem.get()
+                print(f"Memory DB contents: {len(mem_contents['documents'])} documents")
+            except Exception as e:
+                print(f"Error checking memory DB: {e}")
+            try:
+                books_contents = self.chroma_db_books.get()
+                print(f"Books DB contents: {len(books_contents['documents'])} documents")
+                if books_contents['documents']:
+                    print("Sample book document:", books_contents['documents'][0])
+            except Exception as e:
+                print(f"Error checking books DB: {e}")
 
     def orchestrateRetrievers(self, query: str):
         result = (
@@ -281,7 +288,7 @@ class Converse:
     
     def ask(self, query: str):
         isQueryInteresting = self.getIsInteresting(query)
-        self.enable_doc_search = True  # Forced to True for testing
+        self.enable_doc_search = True  # Forced for testing
         if DEBUG_ENABLED:
             print("Is query interesting? " + str(isQueryInteresting))
         fullQuery = self.user_name + ": " + query
